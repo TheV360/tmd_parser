@@ -290,22 +290,28 @@ mod tests {
 		fn make_obj(tmd: &Tmd, name: &str) -> std::io::Result<()> {
 			let mut f = fs::File::create(format!("{}.obj", name))?;
 			
+			let mut index_ofs = 1;
+			
 			for (i, object) in tmd.obj_table.iter().enumerate() {
 				if i > 0 { writeln!(&mut f)?; }
-				writeln!(&mut f, "  o obj{}", i)?;
+				writeln!(&mut f, "o obj{}", i)?;
 				
 				for vertex in object.vertices.iter() {
 					writeln!(&mut f, "  v {} {} {}", vertex.x, vertex.y, vertex.z)?;
 				}
 				
+				let vertices_len = object.vertices.len();
+				
 				for primitive in object.primitives.iter() {
 					match primitive.data {
 						PrimitiveData::Line { colors: _, indices, } => {
-							writeln!(&mut f, "  l {} {}", indices.0 + 1, indices.1 + 1)?;
+							writeln!(&mut f, "  l {} {}", indices.0 as isize - vertices_len as isize, indices.1 as isize - vertices_len as isize)?;
 						},
 						_ => unimplemented!(),
 					}
 				}
+				
+				index_ofs += vertices_len;
 			}
 			
 			Ok(())
@@ -332,22 +338,26 @@ mod tests {
 			let (glh, grh) = (-(glh.abs().max(grh.abs())), grh.abs().max(glh.abs()));
 			let (glh, grh) = (glh - PADDING, grh + PADDING);
 			
+			// Write a space character, since the Vib-Ribbon font has none.
 			let empty = format!("{:5} {}{}{}", 12345, 1, encode_coord(glh), encode_coord(grh));
 			writeln!(&mut f, "{}", &empty)?;
 			
 			// sorry
 			
 			for object in tmd.obj_table.iter() {
-				write!(&mut f, "{:5} {}", 12345, object.primitives.len() + 1)?; // must take into account left/right hand
+				// I have to add 1 to len because the JHF format is freaky
+				// and counts left/right hand as a coord pair.
+				write!(&mut f, "{:5} {}", 12345, object.primitives.len() + 1)?;
 				
+				// Calculate left/right hand, via min/max coord from the vertices.
+				// Maybe it's dangerous to use MIN/MAX here, but eh.
 				let lh = object.vertices.iter().fold(i16::MAX, |a, v| a.min(v.x));
 				let rh = object.vertices.iter().fold(i16::MIN, |a, v| a.max(v.x));
-				
 				// let (lh, rh) = (lh.min(rh), rh.max(lh));
 				let (lh, rh) = (-(lh.abs().max(rh.abs())), rh.abs().max(lh.abs()));
-				
 				let (lh, rh) = (lh - PADDING, rh + PADDING);
 				
+				// Left/right hand values.
 				write!(&mut f, "{}{}", encode_coord(lh), encode_coord(rh))?;
 				
 				let mut last_vert: Option<usize> = None;
