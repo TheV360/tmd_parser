@@ -29,7 +29,9 @@ impl From<u32> for HeaderFlags {
 	}
 }
 
-#[derive(Debug)]
+// This doesn't have a use anymore, since I can just
+// directly create an object via the `object` function.
+/*#[derive(Debug)]
 pub struct ObjectEntry {
 	pub vert_top: u32,
 	pub n_vert: u32,
@@ -38,7 +40,7 @@ pub struct ObjectEntry {
 	pub primitive_top: u32,
 	pub n_primitive: u32,
 	pub scale: i32,
-}
+}*/
 
 #[derive(Debug)]
 pub struct Object {
@@ -49,14 +51,22 @@ pub struct Object {
 	/// This maaaaayyybeee dictates the scaling of the vertices after everything
 	/// is loaded? It's encoded as `2**scale`, so that means
 	/// `-2 = 1/4`, `-1 = 1/2`, `0 = 1`, `1 = 2`, and `2 = 4`.
-	/// It's also completely unused by everyone.
+	/// **It's also completely unused by everyone.**
 	pub scale: i32,
 }
 
 #[derive(Debug)]
 pub struct Primitive {
+	/// Word length of a 2D drawing primitive.(???)
+	/// This is mostly redundant, but is here for completion's sake.
+	/// In the future, it may be used for sanity/validity checks.
 	pub olen: u8,
+	
+	/// Length of the packet data section, in words.
+	/// This is mostly redundant, but is here for completion's sake.
+	/// In the future, it may be used for sanity/validity checks.
 	pub ilen: u8,
+	
 	pub flag: PrimitiveFlags,
 	pub mode: PrimitiveMode,
 	pub data: PrimitiveData,
@@ -64,32 +74,48 @@ pub struct Primitive {
 
 #[derive(Debug)]
 pub struct PrimitiveFlags {
-	/// Should the polygon should have gradation?
+	/// Should the polygon should have gradation / have a gradient color?
 	/// Valid only for non-textured polygons subject to light source calcs.
-	pub grd: bool,
+	/// Named `grd` in `FILEFRMT.PDF`.
+	pub gradient: bool,
 	
 	/// Should the polygon should be double-faced?
 	/// Valid only for polygons.
-	pub fce: bool,
+	/// Named `fce` in `FILEFRMT.PDF`.
+	pub double_sided: bool,
 	
 	/// Should light source calculations happen?
-	pub lgt: bool,
+	/// Named `lgt` in `FILEFRMT.PDF`.
+	pub lit: bool,
 }
 impl From<u8> for PrimitiveFlags {
 	fn from(f: u8) -> Self {
 		PrimitiveFlags {
-			grd: f & 4 > 0,
-			fce: f & 2 > 0,
-			lgt: f & 1 > 0,
+			gradient: f & 4 > 0,
+			double_sided: f & 2 > 0,
+			lit: f & 1 > 0,
 		}
 	}
 }
 
 #[derive(Debug)]
 pub enum PrimitiveMode {
-	Polygon { iip: bool, more: bool, tme: bool, abe: bool, tge: bool },
-	Line { iip: bool, abe: bool },
-	Sprite { siz: PrimitiveSpriteSize, abe: bool },
+	// TODO: give these the same renaming treatment as the above? maybe if they're not too technical?
+	Polygon {
+		iip: bool,
+		more: bool,
+		tme: bool,
+		abe: bool,
+		tge: bool,
+	},
+	Line {
+		iip: bool,
+		abe: bool,
+	},
+	Sprite {
+		siz: PrimitiveSpriteSize,
+		abe: bool,
+	},
 }
 impl From<u8> for PrimitiveMode {
 	fn from(f: u8) -> Self {
@@ -131,7 +157,8 @@ impl From<u8> for PrimitiveSpriteSize {
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum PrimitiveData {
-	Line { colors: (primitive::Color, primitive::Color), indices: (usize, usize) }
+	Line { color: primitive::Color, indices: (usize, usize), },
+	LineGr { colors: (primitive::Color, primitive::Color), indices: (usize, usize), },
 }
 
 #[derive(Debug)]
@@ -163,7 +190,7 @@ impl From<Vector> for Normal {
 	}
 }
 
-fn parse_tmd(data: &[u8]) -> IResult<&[u8], Tmd> {
+pub fn parse_tmd(data: &[u8]) -> IResult<&[u8], Tmd> {
 	let (data, header) = header(data)?;
 	
 	let entire = {
@@ -172,7 +199,7 @@ fn parse_tmd(data: &[u8]) -> IResult<&[u8], Tmd> {
 		} else { data }
 	};
 	
-	let (data, obj_table) = count(object_canon(entire), header.n_obj)(data)?;
+	let (data, obj_table) = count(object(entire), header.n_obj)(data)?;
 	
 	let tmd = Tmd { header, obj_table, };
 	Ok((data, tmd))
@@ -185,7 +212,8 @@ fn header(data: &[u8]) -> IResult<&[u8], Header> {
 	Ok((data, Header { id, flags, n_obj }))
 }
 
-fn object(data: &[u8]) -> IResult<&[u8], ObjectEntry> {
+// See `ObjectEntry` for more information.
+/*fn object_entry(data: &[u8]) -> IResult<&[u8], ObjectEntry> {
 	let mut size_ptr = tuple((le_u32, le_u32));
 	
 	let (data, (vert_top, n_vert)) = size_ptr(data)?;
@@ -201,12 +229,12 @@ fn object(data: &[u8]) -> IResult<&[u8], ObjectEntry> {
 		scale,
 	};
 	Ok((data, entry))
-}
+}*/
 
 /// This takes a slice of all data past the header and returns a function that,
 /// when called, will maybe return an `Object` with all its vertices, normals,
 /// and primitives. It can, however, also return an error.
-fn object_canon<'a>(all_data: &'a [u8]) -> impl Fn(&'a [u8]) -> IResult<&'a [u8], Object> {
+fn object<'a>(all_data: &'a [u8]) -> impl Fn(&'a [u8]) -> IResult<&'a [u8], Object> {
 	move |data: &'a [u8]| {
 		fn le_u32_index(data: &[u8]) -> IResult<&[u8], usize> {
 			map(le_u32, |i| i as usize)(data)
@@ -246,17 +274,19 @@ fn primitive(data: &[u8]) -> IResult<&[u8], Primitive> {
 	// line olen 3, ilen 2, flag 0x1, mode 64.
 	let (data, p_data) = match mode {
 		PrimitiveMode::Line { abe: _, iip } => {
-			let (data, colors) = {
-				if iip { // 2 colors
-					tuple((primitive::color, primitive::color))(data)?
-				} else { // 1 color (twice)
-					tuple((peek(primitive::color), primitive::color))(data)?
-				}
-			};
-			let (data, indices) = tuple((le_u16_index, le_u16_index))(data)?;
-			(data, PrimitiveData::Line { colors, indices })
+			let mut indices = tuple((le_u16_index, le_u16_index));
+			if iip { // 2 colors
+				let (data, colors) = tuple((primitive::color, primitive::color))(data)?;
+				let (data, indices) = indices(data)?;
+				(data, PrimitiveData::LineGr { colors, indices })
+			} else { // 1 color (twice)
+				let (data, color) = primitive::color(data)?;
+				let (data, indices) = indices(data)?;
+				(data, PrimitiveData::Line { color, indices })
+			}
 		},
-		_ => unimplemented!(), // FIXME: primitives aren't completely done
+		_ => { dbg!((mode, flag)); unimplemented!() },
+		// FIXME: primitives aren't completely done
 	};
 	
 	Ok((data, Primitive { olen, ilen, flag, mode, data: p_data }))
@@ -274,4 +304,10 @@ mod primitive {
 		let (data, (r, g, b, _)) = tuple((u8, u8, u8, u8))(data)?;
 		Ok((data, Color { r, g, b, }))
 	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	// TODO: tests need to be written
 }

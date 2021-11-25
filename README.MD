@@ -1,6 +1,6 @@
 ## Basic TMD Parser
 
-I made it to parse Vib-Ribbon's font. To make it, I used a copy of `FILEFRMT.PDF` that actually had visible diagrams and [this random website](https://wiki.xentax.com/index.php/Playstation_TMD) as a baseline.
+I made it to parse Vib-Ribbon's font. To make it, I used a copy of `FILEFRMT.PDF` that actually had visible diagrams (the &copy;2000 one) and [this random website](https://wiki.xentax.com/index.php/Playstation_TMD) as a baseline.
 
 **This literally only supports linemeshes right now.**
 

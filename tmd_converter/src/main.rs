@@ -2,6 +2,8 @@ use std::io::{self, Write};
 use std::fs::{read_dir, read, File};
 use std::ffi::OsStr;
 
+use tmd_parser::*;
+
 fn main() -> io::Result<()> {
 	for entry in read_dir("samples/")? {
 		let entry = entry?;
@@ -18,8 +20,12 @@ fn main() -> io::Result<()> {
 					let tmd = read(&path)?;
 					let (_, tmd) = parse_tmd(&tmd).expect("aauaaahgh");
 					
-					make_obj(&tmd, &name)?;
-					make_jhf_font(&tmd, &name)?;
+					print!("Converting `{}`... ", name);
+					
+					make_obj(&tmd, &name)?; print!("OBJ! ");
+					make_jhf_font(&tmd, &name)?; print!("JHF! ");
+					
+					println!("Done.");
 				}
 			}
 		}
@@ -45,7 +51,8 @@ fn make_obj(tmd: &Tmd, name: &str) -> io::Result<()> {
 		
 		for primitive in object.primitives.iter() {
 			match primitive.data {
-				PrimitiveData::Line { colors: _, indices, } => {
+				PrimitiveData::Line { color: _, indices, } |
+				PrimitiveData::LineGr { colors: _, indices } => {
 					writeln!(&mut f, "  l {} {}", indices.0 as isize - vertices_len as isize, indices.1 as isize - vertices_len as isize)?;
 				},
 				_ => unimplemented!(),
@@ -104,7 +111,8 @@ fn make_jhf_font(tmd: &Tmd, name: &str) -> io::Result<()> {
 		let mut last_vert: Option<usize> = None;
 		for primitive in object.primitives.iter() {
 			match primitive.data {
-				PrimitiveData::Line { colors: _, indices, } => {
+				PrimitiveData::Line { color: _, indices, } |
+				PrimitiveData::LineGr { colors: _, indices } => {
 					let v1 = &object.vertices[indices.1];
 					let v1 = (encode_coord(v1.x), encode_coord(v1.y));
 					if last_vert != Some(indices.0) {
