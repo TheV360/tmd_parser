@@ -2,7 +2,7 @@ use std::io::{self, Write};
 use std::fs::{read_dir, read, File};
 use std::ffi::OsStr;
 
-use tmd_parser::*;
+use tmd_parser::{Tmd, primitive};
 
 fn main() -> io::Result<()> {
 	for entry in read_dir("samples/")? {
@@ -18,7 +18,7 @@ fn main() -> io::Result<()> {
 					let name = format!("{}{}", "fonts/".to_string(), name);
 					
 					let tmd = read(&path)?;
-					let (_, tmd) = parse_tmd(&tmd).expect("aauaaahgh");
+					let (_, tmd) = Tmd::parse(&tmd).expect("aauaaahgh");
 					
 					print!("Converting `{}`... ", name);
 					
@@ -37,8 +37,6 @@ fn main() -> io::Result<()> {
 fn make_obj(tmd: &Tmd, name: &str) -> io::Result<()> {
 	let mut f = File::create(format!("{}.obj", name))?;
 	
-	let mut index_ofs = 1;
-	
 	for (i, object) in tmd.obj_table.iter().enumerate() {
 		if i > 0 { writeln!(&mut f)?; }
 		writeln!(&mut f, "o obj{}", i)?;
@@ -51,15 +49,13 @@ fn make_obj(tmd: &Tmd, name: &str) -> io::Result<()> {
 		
 		for primitive in object.primitives.iter() {
 			match primitive.data {
-				PrimitiveData::Line { color: _, indices, } |
-				PrimitiveData::LineGr { colors: _, indices } => {
+				primitive::PrimitiveData::Line { color: _, indices, } |
+				primitive::PrimitiveData::LineGr { colors: _, indices } => {
 					writeln!(&mut f, "  l {} {}", indices.0 as isize - vertices_len as isize, indices.1 as isize - vertices_len as isize)?;
 				},
 				_ => unimplemented!(),
 			}
 		}
-		
-		index_ofs += vertices_len;
 	}
 	
 	Ok(())
@@ -111,8 +107,8 @@ fn make_jhf_font(tmd: &Tmd, name: &str) -> io::Result<()> {
 		let mut last_vert: Option<usize> = None;
 		for primitive in object.primitives.iter() {
 			match primitive.data {
-				PrimitiveData::Line { color: _, indices, } |
-				PrimitiveData::LineGr { colors: _, indices } => {
+				primitive::PrimitiveData::Line { color: _, indices, } |
+				primitive::PrimitiveData::LineGr { colors: _, indices } => {
 					let v1 = &object.vertices[indices.1];
 					let v1 = (encode_coord(v1.x), encode_coord(v1.y));
 					if last_vert != Some(indices.0) {

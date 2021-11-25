@@ -4,7 +4,7 @@ I made it to parse Vib-Ribbon's font. To make it, I used a copy of `FILEFRMT.PDF
 
 **This literally only supports linemeshes right now.**
 
-I'm gonna go back in and fix a few design flaws, but otherwise I'm *very* happy with how this went! [`nom`](https://github.com/geal/nom) is an incredible crate; that and Rust's strict type system made the parser incredibly easy to develop.
+I'm gonna go back in and fix a few design flaws, but otherwise I'm *very* happy with how this is going! [`nom`](https://github.com/geal/nom) is an incredible crate; that and Rust's strict type system made the parser incredibly easy to develop.
 
 This outputs OBJ files (Cool!) and JHF files (What?). Some caveats:
 * the OBJ files live in a negative Y-up world in the direction of positive Z, so select those values while importing into blender or whatevs.
