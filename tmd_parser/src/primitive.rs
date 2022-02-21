@@ -27,17 +27,16 @@ impl Primitive {
 			map(le_u16, |i| i as usize)(data)
 		}
 		
-		// line olen 3, ilen 2, flag 0x1, mode 64.
 		let (data, p_data) = match mode {
-			PrimitiveMode::Line { abe: _, iip } => {
-				let mut indices = tuple((le_u16_index, le_u16_index));
-				if iip { // 2 colors
-					let (data, colors) = tuple((Color::parse, Color::parse))(data)?;
-					let (data, indices) = indices(data)?;
+			// line olen 3, ilen 2, flag 0x1, mode 64.
+			PrimitiveMode::Line { translucent: _, gradient } => {
+				if gradient { // 2 colors
+					let (data, colors) = tuple((Color::parse_pad, Color::parse_pad))(data)?;
+					let (data, indices) = tuple((le_u16_index, le_u16_index))(data)?;
 					(data, PrimitiveData::LineGr { colors, indices })
-				} else { // 1 color (twice)
-					let (data, color) = Color::parse(data)?;
-					let (data, indices) = indices(data)?;
+				} else { // 1 color
+					let (data, color) = Color::parse_pad(data)?;
+					let (data, indices) = tuple((le_u16_index, le_u16_index))(data)?;
 					(data, PrimitiveData::Line { color, indices })
 				}
 			},
@@ -71,31 +70,67 @@ pub struct PrimitiveFlags {
 impl From<u8> for PrimitiveFlags {
 	fn from(f: u8) -> Self {
 		PrimitiveFlags {
-			gradient: f & 4 > 0,
+			gradient:     f & 4 > 0,
 			double_sided: f & 2 > 0,
-			lit: f & 1 > 0,
+			lit:          f & 1 > 0,
 		}
 	}
 }
 
 #[derive(Debug)]
 pub enum PrimitiveMode {
-	// TODO: give these the same renaming treatment as the ones above?
-	//       maybe if they're not too technical?
 	Polygon {
-		iip: bool,
+		/// What type of shading will this use?
+		/// `false` = flat, `true` = Gouraud
+		/// 
+		/// Named `iip` in `FILEFRMT.PDF`.
+		smooth_shading: bool,
+		
+		/// Is there a 4th vertex?
+		/// 
+		/// Not given a name in `FILEFRMT.PDF`.
 		more: bool,
-		tme: bool,
-		abe: bool,
-		tge: bool,
+		
+		/// Will this use a texture?
+		/// 
+		/// Named `tme` in `FILEFRMT.PDF`.
+		textured: bool,
+		
+		/// Will this be translucent?
+		/// (TODO: does this mean "will this have an alpha channel?")
+		/// 
+		/// Named `abe` in `FILEFRMT.PDF`.
+		translucent: bool,
+		
+		/// Will the texture be lit? (???)
+		/// 
+		/// Named `tge` in `FILEFRMT.PDF`.
+		lit: bool,
 	},
 	Line {
-		iip: bool,
-		abe: bool,
+		/// Will this use two colors and
+		/// interpolate between the two?
+		/// 
+		/// Named `iip` in `FILEFRMT.PDF`.
+		gradient: bool,
+		
+		/// Will this be translucent?
+		/// (TODO: does this mean "will this have an alpha channel?")
+		/// 
+		/// Named `abe` in `FILEFRMT.PDF`.
+		translucent: bool,
 	},
 	Sprite {
-		siz: PrimitiveSpriteSize,
-		abe: bool,
+		/// What size will this sprite be?
+		/// 
+		/// Named `siz` in `FILEFRMT.PDF`.
+		size: PrimitiveSpriteSize,
+		
+		/// Will this be translucent?
+		/// (TODO: does this mean "will this have an alpha channel?")
+		/// 
+		/// Named `abe` in `FILEFRMT.PDF`.
+		translucent: bool,
 	},
 }
 impl From<u8> for PrimitiveMode {
@@ -103,19 +138,19 @@ impl From<u8> for PrimitiveMode {
 		use PrimitiveMode::*;
 		match f >> 5 {
 			1 => Polygon {
-				iip: f & 16 > 0,
-				more: f & 8 > 0, // has 4th vertex?
-				tme: f & 4 > 0,
-				abe: f & 2 > 0,
-				tge: f & 1 > 0,
+				smooth_shading: f & 16 > 0,
+				more:           f &  8 > 0,
+				textured:       f &  4 > 0,
+				translucent:    f &  2 > 0,
+				lit:            f &  1 > 0,
 			},
 			2 => Line {
-				iip: f & 16 > 0,
-				abe: f & 2 > 0,
+				gradient:    f & 16 > 0,
+				translucent: f &  2 > 0,
 			},
 			3 => Sprite {
-				siz: PrimitiveSpriteSize::from(f),
-				abe: f & 2 > 0,
+				size: PrimitiveSpriteSize::from(f),
+				translucent: f & 2 > 0,
 			},
 			_ => unimplemented!(),
 		}
@@ -148,7 +183,9 @@ pub struct Color {
 }
 impl Color {
 	pub fn parse(data: &[u8]) -> IResult<&[u8], Self> {
-		let (data, (r, g, b, _)) = tuple((u8, u8, u8, u8))(data)?;
-		Ok((data, Color { r, g, b, }))
+		map(tuple((u8, u8, u8)), |(r, g, b)| Color { r, g, b, })(data)
+	}
+	pub fn parse_pad(data: &[u8]) -> IResult<&[u8], Self> {
+		map(tuple((Color::parse, u8)), |(c, _)| c)(data)
 	}
 }

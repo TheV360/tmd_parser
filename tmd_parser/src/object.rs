@@ -1,17 +1,18 @@
 use crate::nom_starter_pack::*;
 use crate::primitive::Primitive;
 
-#[derive(Debug)]
+#[derive(Debug, Default, PartialEq, Eq)]
 pub struct Vector {
 	pub x: i16, pub y: i16, pub z: i16,
 }
 type Vertex = Vector; // this doesn't do much, but it's the thought that counts
 impl Vertex {
-	/// This is used to parse a Vertex.
-	/// There may be a need in the future for a "takes only 3 ints" variant.
 	pub fn parse(data: &[u8]) -> IResult<&[u8], Self> {
-		let (data, (x, y, z, _)) = tuple((le_i16, le_i16, le_i16, le_i16))(data)?;
+		let (data, (x, y, z)) = tuple((le_i16, le_i16, le_i16))(data)?;
 		Ok((data, Vector { x, y, z }))
+	}
+	pub fn parse_pad(data: &[u8]) -> IResult<&[u8], Self> {
+		map(tuple((Vertex::parse, le_i16)), |(v, _)| v)(data)
 	}
 }
 impl From<Normal> for Vector {
@@ -33,6 +34,9 @@ impl Normal {
 	pub fn parse(data: &[u8]) -> IResult<&[u8], Self> {
 		into(Vertex::parse)(data)
 	}
+	pub fn parse_pad(data: &[u8]) -> IResult<&[u8], Self> {
+		into(Vertex::parse_pad)(data)
+	}
 }
 impl From<Vector> for Normal {
 	fn from(v: Vector) -> Self {
@@ -43,40 +47,6 @@ impl From<Vector> for Normal {
 		}
 	}
 }
-
-/*
-// This doesn't have a use anymore, since I can just
-// directly create an object via `Object::parse_with`.
-#[derive(Debug)]
-pub struct ObjectEntry {
-	pub vert_top: u32,
-	pub n_vert: u32,
-	pub normal_top: u32,
-	pub n_normal: u32,
-	pub primitive_top: u32,
-	pub n_primitive: u32,
-	pub scale: i32,
-}
-impl ObjectEntry {
-	pub fn parse(data: &[u8]) -> IResult<&[u8], Self> {
-		let mut size_ptr = tuple((le_u32, le_u32));
-		
-		let (data, (vert_top, n_vert)) = size_ptr(data)?;
-		let (data, (normal_top, n_normal)) = size_ptr(data)?;
-		let (data, (primitive_top, n_primitive)) = size_ptr(data)?;
-		
-		let (data, scale) = le_i32(data)?;
-		
-		let entry = ObjectEntry {
-			vert_top, n_vert,
-			normal_top, n_normal,
-			primitive_top, n_primitive,
-			scale,
-		};
-		Ok((data, entry))
-	}
-}
-*/
 
 #[derive(Debug)]
 pub struct Object {
@@ -106,11 +76,32 @@ impl Object {
 			
 			let (data, scale) = le_i32(data)?;
 			
-			let (_, vertices) = count(Vertex::parse, vertex_len)(&all_data[vertex_ptr..])?;
-			let (_, normals) = count(Normal::parse, normal_len)(&all_data[normal_ptr..])?;
+			let (_, vertices) = count(Vertex::parse_pad, vertex_len)(&all_data[vertex_ptr..])?;
+			let (_, normals) = count(Normal::parse_pad, normal_len)(&all_data[normal_ptr..])?;
 			let (_, primitives) = count(Primitive::parse, primitive_len)(&all_data[primitive_ptr..])?;
 			
 			Ok((data, Object { vertices, normals, primitives, scale, }))
 		}
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	
+	#[test]
+	fn dont_take_too_much() {
+		const D: &[u8] = &[64, 0, 128, 0, 255, 0, 69, 96, 255, 0, 128, 0, 64, 0, 8, 0];
+		
+		let data = D;
+		let (data, vector) = Vertex::parse_pad(data)
+			.expect("Should only take 8 bytes");
+		assert_eq!(data.len(), 8);
+		assert_eq!(vector, Vector { x: 64, y: 128, z: 255 });
+		
+		let (data, vector) = Vertex::parse(data)
+			.expect("Should only take 6 bytes");
+		assert!(!data.is_empty());
+		assert_eq!(vector, Vector { x: 255, y: 128, z: 64 });
 	}
 }

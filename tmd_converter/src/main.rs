@@ -1,10 +1,16 @@
 use std::io::{self, Write};
-use std::fs::{read_dir, read, File};
+use std::fs::{File, read, read_dir};
 use std::ffi::OsStr;
 
-use tmd_parser::{Tmd, primitive};
+use tmd_parser::{Tmd, primitive, object::Vector};
 
 fn main() -> io::Result<()> {
+	// create_dir("out/")?;
+	// create_dir("out/models/")?;
+	// create_dir("out/fonts/")?;
+	
+	println!("Shrinking vertices by a factor of 50. If this is not okay, uh. Idk");
+	
 	for entry in read_dir("samples/")? {
 		let entry = entry?;
 		let path = entry.path();
@@ -15,15 +21,14 @@ fn main() -> io::Result<()> {
 					let name = path.file_stem()
 						.map(|p| OsStr::to_string_lossy(p).to_string())
 						.unwrap_or_else(|| "funny".to_string());
-					let name = format!("{}{}", "fonts/".to_string(), name);
 					
 					let tmd = read(&path)?;
-					let (_, tmd) = Tmd::parse(&tmd).expect("aauaaahgh");
+					let (_, tmd) = Tmd::parse(&tmd).expect("Failed to parse TMD.");
 					
 					print!("Converting `{}`... ", name);
 					
-					make_obj(&tmd, &name)?; print!("OBJ! ");
-					make_jhf_font(&tmd, &name)?; print!("JHF! ");
+					make_obj(&tmd, &format!("{}{}", "out/models/", &name))?; print!("OBJ! ");
+					make_jhf_font(&tmd, &format!("{}{}", "out/fonts/", &name))?; print!("JHF! ");
 					
 					println!("Done.");
 				}
@@ -34,15 +39,38 @@ fn main() -> io::Result<()> {
 	Ok(())
 }
 
+#[derive(Debug, Default)]
+struct Bounds {
+	min: Vector,
+	max: Vector,
+}
+impl Bounds {
+	fn look(&mut self, v: &Vector) {
+		self.min.x = self.min.x.min(v.x);
+		self.min.y = self.min.y.min(v.y);
+		self.min.z = self.min.z.min(v.z);
+		
+		self.max.x = self.max.x.max(v.x);
+		self.max.y = self.max.y.max(v.y);
+		self.max.z = self.max.z.max(v.z);
+	}
+}
+
 fn make_obj(tmd: &Tmd, name: &str) -> io::Result<()> {
+	const SMALL_YOUR_OBJ: f64 = 50.0_f64;
+	
 	let mut f = File::create(format!("{}.obj", name))?;
+	
+	let mut bounds = Bounds::default();
 	
 	for (i, object) in tmd.obj_table.iter().enumerate() {
 		if i > 0 { writeln!(&mut f)?; }
 		writeln!(&mut f, "o obj{}", i)?;
 		
 		for vertex in object.vertices.iter() {
-			writeln!(&mut f, "  v {} {} {}", vertex.x, vertex.y, vertex.z)?;
+			let rv = (vertex.x as f64 / SMALL_YOUR_OBJ, vertex.y as f64 / SMALL_YOUR_OBJ, vertex.z as f64 / SMALL_YOUR_OBJ);
+			writeln!(&mut f, "  v {} {} {}", rv.0, rv.1, rv.2)?;
+			bounds.look(vertex);
 		}
 		
 		let vertices_len = object.vertices.len();
@@ -57,6 +85,8 @@ fn make_obj(tmd: &Tmd, name: &str) -> io::Result<()> {
 			}
 		}
 	}
+	
+	// TODO: use bounds or something
 	
 	Ok(())
 }
@@ -75,7 +105,7 @@ fn make_jhf_font(tmd: &Tmd, name: &str) -> io::Result<()> {
 	
 	let mut f = File::create(format!("{}.jhf", name))?;
 	
-	// please don'thave empty obj table
+	// please don't have an empty obj table.
 	let first_i_prommy = tmd.obj_table.first().unwrap();
 	let glh = first_i_prommy.vertices.iter().fold(i16::MAX, |a, v| a.min(v.x));
 	let grh = first_i_prommy.vertices.iter().fold(i16::MIN, |a, v| a.max(v.x));
@@ -86,12 +116,13 @@ fn make_jhf_font(tmd: &Tmd, name: &str) -> io::Result<()> {
 	let empty = format!("{:5} {}{}{}", 12345, 1, encode_coord(glh), encode_coord(grh));
 	writeln!(&mut f, "{}", &empty)?;
 	
-	// sorry
-	
 	for object in tmd.obj_table.iter() {
 		// I have to add 1 to len because the JHF format is freaky
 		// and counts left/right hand as a coord pair.
-		write!(&mut f, "{:5} {}", 12345, object.primitives.len() + 1)?;
+		// Also, each primitive contains two points.
+		// TODO: This is annoying -- if I even try to optimize the mesh later,
+		//       this vertex total becomes inaccurate.
+		write!(&mut f, "{:5} {}", 12345, object.primitives.len() * 2 + 1)?;
 		
 		// Calculate left/right hand, via min/max coord from the vertices.
 		// Maybe it's dangerous to use MIN/MAX here, but eh.
@@ -104,28 +135,21 @@ fn make_jhf_font(tmd: &Tmd, name: &str) -> io::Result<()> {
 		// Left/right hand values.
 		write!(&mut f, "{}{}", encode_coord(lh), encode_coord(rh))?;
 		
-		let mut last_vert: Option<usize> = None;
+		// TODO: Try optimizing the mesh when this format matters. (never)
 		for primitive in object.primitives.iter() {
 			match primitive.data {
 				primitive::PrimitiveData::Line { color: _, indices, } |
 				primitive::PrimitiveData::LineGr { colors: _, indices } => {
-					let v1 = &object.vertices[indices.1];
+					let (v0, v1) = (&object.vertices[indices.0], &object.vertices[indices.1]);
+					let v0 = (encode_coord(v0.x), encode_coord(v0.y));
 					let v1 = (encode_coord(v1.x), encode_coord(v1.y));
-					if last_vert != Some(indices.0) {
-						let v0 = &object.vertices[indices.0];
-						let v0 = (encode_coord(v0.x), encode_coord(v0.y));
-						write!(&mut f, "{}{}", v0.0, v0.1)?;
-					}
-					write!(&mut f, "{}{}", v1.0, v1.1)?;
-					if last_vert != Some(indices.0) {
-						write!(&mut f, " R")?;
-					}
-					last_vert = Some(indices.1);
+					write!(&mut f, "{}{}{}{} R", v0.0, v0.1, v1.0, v1.1)?;
 				},
 				_ => unimplemented!(),
 			}
 		}
 		
+		// Onto the next character!
 		writeln!(&mut f)?;
 	}
 	
